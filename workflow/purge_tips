@@ -1,0 +1,5 @@
+#!/bin/bash
+# Usage: purge_tips [snakemake options]
+
+ROOT=$(dirname $0)
+snakemake all -s ${ROOT}/snakemake/Snakefile -c 1 $@

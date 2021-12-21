@@ -1,0 +1,28 @@
+################################################################################
+#                        Environment-specific settings
+################################################################################
+
+# Shell
+shell_executable: "/bin/bash"
+
+# Commands to load modulefiles, etc.
+shell_prefix: >-
+  shopt -s expand_aliases;
+  . /apps/free/lmod/lmod/init/bash;
+  module use /apps/.bioinfo-ugrp-modulefiles81;
+
+# List of dependent environment modules
+modules:
+  seqkit: "Other/seqkit/2.0.0"
+  samtools: "samtools/1.12"
+  hifiasm: "Other/hifiasm/0.16.1"
+  gfatools: "Other/gfatools/0.5"
+  winnowmap: "Other/winnowmap/2.03"
+
+################################################################################
+#                         Dataset-specific settings
+################################################################################
+
+hifi_fastq: "your-hifi-fastq-file"
+error_thres: 10
+hifiasm_options: ""

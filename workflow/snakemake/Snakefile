@@ -1,0 +1,150 @@
+from os.path import exists, split, splitext
+
+def parse_path(path):
+    """Decompose /path/to/foo.txt into `("/path/to", "foo", "txt")`."""
+    dirname, filename = split(path)
+    basename, ext = splitext(filename)
+    if ext.startswith('.'):
+        ext = ext[1:]
+    else:
+        assert ext == ''
+    return (dirname, basename, ext)
+
+################################################################################
+#                                  Configs
+################################################################################
+
+# from snakemake.utils import min_version
+# min_version("6.0")
+configfile: "config.yaml"
+shell.executable(config["shell_executable"])
+shell.prefix(config["shell_prefix"])
+
+################################################################################
+#                                  Workflow
+################################################################################
+
+root, base, ext = parse_path(config['hifi_fastq'])
+FINAL_OUTPUT = f"{base}.filtered.fastq"
+COUNTER = 1
+
+def is_converged(wildcards):
+    global FINAL_OUTPUT, COUNTER
+    if not exists(FINAL_OUTPUT):
+        checkpoints.purge_tips.get(dir=COUNTER)
+        COUNTER += 1
+        return f"{COUNTER}/{base}.filtered.fastq"
+    else:
+        return FINAL_OUTPUT
+
+localrules: all
+rule all:
+    input: is_converged
+
+localrules: ln_input
+rule ln_input:
+    output:
+        read = f"{{dir}}/{base}.fastq"
+    threads: 1
+    params:
+        last_hifi_fastq = lambda w: (config['hifi_fastq'] if int(w.dir) == 1
+                                     else f"{int(w.dir) - 1}/{base}.filtered.fastq")
+    shell:
+        """
+        ln -sf $(readlink -f {params.last_hifi_fastq}) {output.read}
+        """
+
+rule hifiasm:
+    input:
+        read = f"{{dir}}/{base}.fastq"
+    output:
+        f"{{dir}}/{base}.bp.p_utg.noseq.gfa",
+        f"{{dir}}/{base}.bp.p_utg.fasta",
+        temp(f"{{dir}}/{base}.ec.bin"),
+        temp(f"{{dir}}/{base}.ovlp.reverse.bin"),
+        temp(f"{{dir}}/{base}.ovlp.source.bin")
+    log:
+        f"log/{base}.round{{dir}}.hifiasm.log"
+    threads: 128
+    resources:
+        mem_gb = 500,
+        time = "72:00:00"
+    params:
+        module = ' '.join([config["modules"][name] for name in ("hifiasm", "gfatools")]),
+        options = config["hifiasm_options"],
+        out_prefix = lambda w: f"{w.dir}/{base}"
+    shell:
+        """
+        module load {params.module}
+        hifiasm -o {params.out_prefix} -t {threads} {params.options} {input.read} 2>&1 >{log}
+        for DATA in {wildcards.dir}/*tg.gfa; do
+            gfatools gfa2fa ${{DATA}} >${{DATA%.gfa}}.fasta
+        done
+        """
+
+rule winnowmap:
+    input:
+        read  = f"{{dir}}/{base}.fastq",
+        asm   = f"{{dir}}/{base}.bp.p_utg.fasta"
+    output:
+        bam   = f"{{dir}}/{base}.bp.p_utg.fasta.bam",
+        bai   = f"{{dir}}/{base}.bp.p_utg.fasta.bam.bai",
+        meryl = directory(temp(f"{{dir}}/{base}.bp.p_utg.fasta.meryl")),
+        rep   = temp(f"{{dir}}/{base}.bp.p_utg.fasta.rep")
+    log:
+        f"log/{base}.round{{dir}}.winnowmap.log"
+    threads: 128
+    resources:
+        mem_gb = 500,
+        time = "72:00:00"
+    params:
+        module = ' '.join([config["modules"][name] for name in ("samtools", "winnowmap")]),
+    shell:
+        """
+        module load {params.module}
+        meryl count k=15 output {output.meryl} {input.asm}
+        meryl print greater-than distinct=0.9998 {output.meryl} >{output.rep}
+        winnowmap -W {output.rep} -t{threads} -ax "map-pb" --eqx --secondary=no -Y {input.asm} {input.read} |
+            samtools sort -@{threads} -o {output.bam}
+        samtools index -@{threads} {output.bam}
+        """
+
+checkpoint purge_tips:
+    input:
+        read     = f"{{dir}}/{base}.fastq",
+        gfa      = f"{{dir}}/{base}.bp.p_utg.noseq.gfa",
+        bam      = f"{{dir}}/{base}.bp.p_utg.fasta.bam",
+        bai      = f"{{dir}}/{base}.bp.p_utg.fasta.bam.bai"
+    output:
+        read     = f"{{dir}}/{base}.filtered.fastq",
+        ng_cname = f"{{dir}}/{base}.bp.p_utg.noseq.gfa.ng_cnames",
+        ng_rname = f"{{dir}}/{base}.bp.p_utg.noseq.gfa.ng_rnames",
+        ng_read  = f"{{dir}}/{base}.ng.fastq"
+    log:
+        f"log/{base}.round{{dir}}.purge_tips.log"
+    threads: 8
+    resources:
+        mem_gb = 500,
+        time = "12:00:00"
+    params:
+        module = ' '.join([config["modules"][name] for name in ("samtools", "seqkit")]),
+        e_thres = config['error_thres'],
+        final_output = FINAL_OUTPUT
+    shell:
+        """
+        module load {params.module}
+        awk -v thres_cov={params.e_thres} '/^S/ && int(substr($5,6)) <= thres_cov {{print $2}}' {input.gfa} >{output.ng_cname}
+        if [ ! -s {output.ng_cname} ]; then
+            ln -sf {input.read} {params.final_output}
+            touch {output.read}
+            touch {output.ng_rname}
+            touch {output.ng_read}
+            echo "No low-cov contigs found. Finish purge_tips."
+            exit 0
+        fi
+        samtools view {input.bam} $(cat {output.ng_cname}) |
+            cut -f1 |
+            sort -u >{output.ng_rname}
+        seqkit grep -v -n -f {output.ng_rname} {input.read} > {output.read}
+        seqkit grep -n -f {output.ng_rname} {input.read} > {output.ng_read}
+        """
