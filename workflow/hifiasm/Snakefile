@@ -1,0 +1,53 @@
+include: "../common.smk"
+SNAKE_DIR = os.path.normpath(os.path.dirname(workflow.snakefile))
+
+################################################################################
+#                             Stand-alone rules
+################################################################################
+
+ROOT, BASE, EXT = parse_path(config['hifi_fastq'])
+OUT_DIR = config['out_dir'] if 'out_dir' in config else '.'
+
+localrules: all
+rule all:
+    input: f"{OUT_DIR}/{BASE}.hifiasm.bp.p_utg.fasta"
+
+localrules: ln_input
+rule ln_input:
+    output:
+        read = "{dir}/{base}.fastq"
+    params:
+        in_read = config['hifi_fastq']
+    shell:
+        """
+        ln -sf $(readlink -f {params.in_read}) {output.read}
+        """
+
+################################################################################
+#                               Module rules
+################################################################################
+
+rule hifiasm:
+    input:
+        read = "{dir}/{base}.fastq"
+    output:
+        gfa  = "{dir}/{base}.hifiasm.bp.p_utg.noseq.gfa",
+        asm  = "{dir}/{base}.hifiasm.bp.p_utg.fasta",
+        _    = temp("{dir}/{base}.hifiasm.ec.bin"),
+        __   = temp("{dir}/{base}.hifiasm.ovlp.reverse.bin"),
+        ___  = temp("{dir}/{base}.hifiasm.ovlp.source.bin")
+    log:
+        "{dir}/{base}.hifiasm.log"
+    threads: 128
+    resources:
+        mem_gb = 500,
+        time = "72:00:00"
+    params:
+        script  = f"{SNAKE_DIR}/hifiasm.sh",
+        module  = get_modules(["hifiasm", "gfatools"]),
+        options = config["hifiasm_options"]
+    shell:
+        """
+        module load {params.module}
+        bash {params.script} {wildcards.dir} {input.read} {threads} {params.options} >{log} 2>&1
+        """

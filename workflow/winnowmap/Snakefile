@@ -1,0 +1,70 @@
+include: "../common.smk"
+SNAKE_DIR = os.path.normpath(os.path.dirname(workflow.snakefile))
+
+################################################################################
+#                             Stand-alone rules
+################################################################################
+
+# Optional arguments
+OUT_DIR = config['out_dir'] if 'out_dir' in config else '.'
+
+# Mandatory arguments for stand-alone mode
+MANDATORY_ARGS = ['hifi_fastq', 'asm_fasta']
+
+if all([key in config for key in MANDATORY_ARGS]):
+    ROOT, BASE, EXT = parse_path(config['hifi_fastq'])
+    _, ASM, _ = parse_path(config['asm_fasta'])
+
+    localrules: all
+    rule all:
+        input: f"{OUT_DIR}/{BASE}.{ASM}.winnowmap.fasta"
+
+    localrules: ln_input_read, ln_input_asm
+    rule ln_input_read:
+        output:
+            read = "{dir}/{base}.fastq"
+        params:
+            in_read = config['hifi_fastq']
+        shell:
+            """
+            ln -sf $(readlink -f {params.in_read}) {output.read}
+            """
+    rule ln_input_asm:
+        output:
+            asm = "{dir}/{asm}.fasta"
+        params:
+            in_asm = config['asm_fasta']
+        shell:
+            """
+            ln -sf $(readlink -f {params.in_asm}) {output.asm}
+            """
+
+################################################################################
+#                               Module rules
+################################################################################
+
+# TODO: change default input/output names?
+rule winnowmap:
+    input:
+        asm  = "{dir}/{asm}.fasta",
+        read = "{dir}/{base}.fastq"
+    output:
+        bam  = "{dir}/{asm}.fasta.{base}.fastq.winnowmap.bam",
+        bai  = "{dir}/{asm}.fasta.{base}.fastq.winnowmap.bam.bai",
+        _    = directory(temp("{dir}/{asm}.fasta.{base}.fastq.winnowmap.meryl")),
+        __   = temp("{dir}/{asm}.fasta.{base}.fastq.winnowmap.rep")
+    log:
+        "{dir}/{asm}.fasta.{base}.fastq.winnowmap.log"
+    threads: 128
+    resources:
+        mem_gb = 500,
+        time = "72:00:00"
+    params:
+        script  = f"{SNAKE_DIR}/winnowmap.sh",
+        module = get_modules(["samtools", "winnowmap"]),
+        out_prefix = lambda wildcards, output: parse_path(output.bam)[1]
+    shell:
+        """
+        module load {params.module}
+        bash {params.script} {wildcards.dir} {input.read} {input.asm} {params.out_prefix} {threads} >{log} 2>&1
+        """

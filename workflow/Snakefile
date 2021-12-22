@@ -1,0 +1,99 @@
+include: "common.smk"
+SNAKE_DIR = os.path.normpath(os.path.dirname(workflow.snakefile))
+
+################################################################################
+#                                The workflow
+################################################################################
+
+ROOT, BASE, EXT = parse_path(config['hifi_fastq'])
+base = BASE
+FINAL_OUTPUT = f"{BASE}.filtered.fastq"
+COUNTER = 1
+
+def is_converged(wildcards):
+    global FINAL_OUTPUT, COUNTER
+    if not os.path.exists(FINAL_OUTPUT):
+        checkpoints.purge_tips.get(dir=COUNTER)
+        COUNTER += 1
+        return f"{COUNTER}/{BASE}.filtered.fastq"
+    else:
+        return FINAL_OUTPUT
+
+localrules: all
+rule all:
+    input: is_converged
+
+localrules: ln_input
+rule ln_input:
+    output:
+        read = f"{{dir}}/{BASE}.fastq"
+    threads: 1
+    params:
+        last_hifi_fastq = lambda w: (config['hifi_fastq'] if int(w.dir) == 1
+                                     else f"{int(w.dir) - 1}/{BASE}.filtered.fastq")
+    shell:
+        """
+        ln -sf $(readlink -f {params.last_hifi_fastq}) {output.read}
+        """
+
+module hifiasm:
+    snakefile: "hifiasm/Snakefile"
+    config: config
+
+use rule hifiasm from hifiasm
+
+module winnowmap:
+    snakefile: "winnowmap/Snakefile"
+    config: config
+
+use rule winnowmap from winnowmap with:
+    input:
+        asm  = "{dir}/{base}.hifiasm.bp.p_utg.fasta",
+        read = "{dir}/{base}.fastq"
+    output:
+        bam  = "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.bam",
+        bai  = "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.bam.bai",
+        _    = directory(temp("{dir}/{base}.hifiasm.bp.p_utg.winnowmap.meryl")),
+        __   = temp("{dir}/{base}.hifiasm.bp.p_utg.winnowmap.rep")
+    log:
+        "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.log"
+
+checkpoint purge_tips:
+    input:
+        read     = "{dir}/{base}.fastq",
+        gfa      = "{dir}/{base}.hifiasm.bp.p_utg.noseq.gfa",
+        bam      = "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.bam",
+        bai      = "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.bam.bai"
+    output:
+        read     = "{dir}/{base}.filtered.fastq",
+        ng_cname = "{dir}/{base}.hifiasm.bp.p_utg.noseq.gfa.ng_cnames",
+        ng_rname = "{dir}/{base}.hifiasm.bp.p_utg.noseq.gfa.ng_rnames",
+        ng_read  = "{dir}/{base}.ng.fastq"
+    log:
+        "{dir}/{base}.purge_tips.log"
+    threads: 8
+    resources:
+        mem_gb = 500,
+        time = "12:00:00"
+    params:
+        module = get_modules(["samtools", "seqkit"]),
+        e_thres = config['error_thres'],
+        final_output = FINAL_OUTPUT
+    shell:
+        """
+        module load {params.module}
+        awk -v thres_cov={params.e_thres} '/^S/ && int(substr($5,6)) <= thres_cov {{print $2}}' {input.gfa} >{output.ng_cname}
+        if [ ! -s {output.ng_cname} ]; then
+            ln -sf {input.read} {params.final_output}
+            touch {output.read}
+            touch {output.ng_rname}
+            touch {output.ng_read}
+            echo "No low-cov contigs found. Finish purge_tips."
+            exit 0
+        fi
+        samtools view {input.bam} $(cat {output.ng_cname}) |
+            cut -f1 |
+            sort -u >{output.ng_rname}
+        seqkit grep -v -n -f {output.ng_rname} {input.read} > {output.read}
+        seqkit grep -n -f {output.ng_rname} {input.read} > {output.ng_read}
+        """
