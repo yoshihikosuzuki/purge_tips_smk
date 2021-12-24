@@ -1,14 +1,6 @@
 # purge_tips
 
-Given an assembly (as a GFA file) and reads from which the assembly was generated, purge_tips removes reads mapped to low-coverage contigs that are deemed contamination, etc.
-Such low-coverage contigs often exist as "tips" (i.e. short branches) in an assembly graph, and we named this tool after [purge_dups](https://github.com/dfguan/purge_dups), one of whose purposes is somewhat similar to ours.
-By simply re-running an assembler with the filtered reads, it is expected that one can possibly improve the N50 and the quality of the assembly.
-
-One use case would be when the total size of the assembled primary unitigs (which should represent all the sequences from which the reads were generated, without merging different haplotypes) is too large compared to the known genome size times the ploidy of the genome, i.e. the maximum size of an ideal genome assembly of a single individual.
-
-Currently we assume only HiFi reads as input and assume that there exist some environment modules with specific names (hard-coded in `purge_tips`).
-
-**Disclaimer: This is experimental at this point, and we have not confirmed if it is accurate in any sense.**
+Snakemake version of [purge_tips](https://github.com/yoshihikosuzuki/purge_tips).
 
 ## Dependency
 
@@ -26,13 +18,15 @@ We strongly recommend installing these software 1) as Environment Module/Lmod mo
 Essentially you can run purge_tips simply by executing the `purge_tips` file (which is actually a bash script invoking the `snakemake` command) in the `workflow/` directory in this repository:
 
 ```bash
+$ git clone https://github.com/yoshihikosuzuki/purge_tips_smk
+$ cd purge_tips_smk
 $ purge_tips [snakemake options]
 ```
 
-To make the command available at any directory, add the path to `workflow/` to the `PATH` environment variable:
+To make the command available at any directory, add the root path to the `PATH` environment variable:
 
 ```bash
-$ export PATH=/path/to/workflow/:$PATH
+$ export PATH=/path/to/purge_tips_smk:$PATH
 ```
 
 ## How to specify inputs/parameters/other configs
@@ -40,17 +34,29 @@ $ export PATH=/path/to/workflow/:$PATH
 All configurations are spcified via a config file, whose template is the `config.yaml` file in this repository:
 
 ```bash
-TODO: contents of config.yaml
+################################################################################
+#                        Environment-specific settings
+################################################################################
+
+# Commands to load modulefiles, etc.
+shell_prefix: >-
+  shopt -s expand_aliases;
+  . /apps/free/lmod/lmod/init/bash;
+  module use /apps/.bioinfo-ugrp-modulefiles81;
+
+# List of dependent environment modules
+modules:
+  seqkit: "Other/seqkit/2.0.0"
+  samtools: "samtools/1.12"
+  hifiasm: "Other/hifiasm/0.16.1"
+  gfatools: "Other/gfatools/0.5"
+  winnowmap: "Other/winnowmap/2.03"
+
+################################################################################
+#                         Dataset-specific settings
+################################################################################
+
+hifi_fastq: "your-hifi-fastq-file"
+error_thres: 10
+hifiasm_options: ""
 ```
-
-TODO: edit below
-
-- `<hifi.fastq>`: Input HiFi read dataset.
-- `-e`: Threshold of the read depth of contigs. Any contig whose read depth is lower than or equal to this value is filtered out.
-- `-T`: Number of threads.
-
-## Output
-
-In each subdirectory with an integer name (e.g. `1/`, `2/`, etc.), 1) input reads are assembled, 2) reads are mapped to the contigs, and 3) reads mapped to low-coverage contigs are filtered out. The filtered reads are used as the input for the next round. The iteration stops when there no longer exist low-coverage contigs.
-
-- `<N-1>/filtered.fastq` (where `N` is the maximum number among the subdirectories): The final filtered read set.
