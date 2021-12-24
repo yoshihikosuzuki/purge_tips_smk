@@ -1,4 +1,4 @@
-# purge_tips
+# purge_tips_smk
 
 Snakemake version of [purge_tips](https://github.com/yoshihikosuzuki/purge_tips).
 
