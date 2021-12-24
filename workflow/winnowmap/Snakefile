@@ -5,56 +5,32 @@ SNAKE_DIR = os.path.normpath(os.path.dirname(workflow.snakefile))
 #                             Stand-alone rules
 ################################################################################
 
-# Optional arguments
 OUT_DIR = config['out_dir'] if 'out_dir' in config else '.'
 
-# Mandatory arguments for stand-alone mode
-MANDATORY_ARGS = ['hifi_fastq', 'asm_fasta']
-
-if all([key in config for key in MANDATORY_ARGS]):
-    ROOT, BASE, EXT = parse_path(config['hifi_fastq'])
-    _, ASM, _ = parse_path(config['asm_fasta'])
+if stand_alone(['asm_fasta', 'hifi_fastq']):
+    _, ASM_BASE, _ = parse_path(config['asm_fasta'])
+    _, HIFI_BASE, _ = parse_path(config['hifi_fastq'])
 
     localrules: all
     rule all:
-        input: f"{OUT_DIR}/{BASE}.{ASM}.winnowmap.fasta"
-
-    localrules: ln_input_read, ln_input_asm
-    rule ln_input_read:
-        output:
-            read = "{dir}/{base}.fastq"
-        params:
-            in_read = config['hifi_fastq']
-        shell:
-            """
-            ln -sf $(readlink -f {params.in_read}) {output.read}
-            """
-    rule ln_input_asm:
-        output:
-            asm = "{dir}/{asm}.fasta"
-        params:
-            in_asm = config['asm_fasta']
-        shell:
-            """
-            ln -sf $(readlink -f {params.in_asm}) {output.asm}
-            """
+        input: f"{OUT_DIR}/{ASM_BASE}.{HIFI_BASE}.winnowmap.bam"
 
 ################################################################################
 #                               Module rules
 ################################################################################
 
-# TODO: change default input/output names?
+# TODO: Better way of handling inputs
 rule winnowmap:
     input:
-        asm  = "{dir}/{asm}.fasta",
-        read = "{dir}/{base}.fastq"
+        asm  = "{dir}/asm.fasta",
+        read = "{dir}/reads.fastq"
     output:
-        bam  = "{dir}/{asm}.fasta.{base}.fastq.winnowmap.bam",
-        bai  = "{dir}/{asm}.fasta.{base}.fastq.winnowmap.bam.bai",
-        _    = directory(temp("{dir}/{asm}.fasta.{base}.fastq.winnowmap.meryl")),
-        __   = temp("{dir}/{asm}.fasta.{base}.fastq.winnowmap.rep")
+        bam  = "{dir}/{base}.winnowmap.bam",
+        bai  = "{dir}/{base}.winnowmap.bam.bai",
+        _    = directory(temp("{dir}/{base}.winnowmap.meryl")),
+        __   = temp("{dir}/{base}.winnowmap.rep")
     log:
-        "{dir}/{asm}.fasta.{base}.fastq.winnowmap.log"
+        "{dir}/{base}.winnowmap.log"
     threads: 128
     resources:
         mem_gb = 500,

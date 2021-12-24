@@ -5,23 +5,14 @@ SNAKE_DIR = os.path.normpath(os.path.dirname(workflow.snakefile))
 #                             Stand-alone rules
 ################################################################################
 
-ROOT, BASE, EXT = parse_path(config['hifi_fastq'])
 OUT_DIR = config['out_dir'] if 'out_dir' in config else '.'
 
-localrules: all
-rule all:
-    input: f"{OUT_DIR}/{BASE}.hifiasm.bp.p_utg.fasta"
+if stand_alone(['hifi_fastq']):
+    _, HIFI_BASE, _ = parse_path(config['hifi_fastq'])
 
-localrules: ln_input
-rule ln_input:
-    output:
-        read = "{dir}/{base}.fastq"
-    params:
-        in_read = config['hifi_fastq']
-    shell:
-        """
-        ln -sf $(readlink -f {params.in_read}) {output.read}
-        """
+    localrules: all
+    rule all:
+        input: f"{OUT_DIR}/{HIFI_BASE}.hifiasm.bp.p_utg.fasta"
 
 ################################################################################
 #                               Module rules

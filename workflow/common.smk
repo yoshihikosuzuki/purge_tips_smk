@@ -6,7 +6,7 @@ from snakemake.utils import min_version
 min_version("6.0")
 import os
 configfile: "config.yaml"
-shell.executable("/bin/bash")
+shell.executable("bash")
 shell.prefix(config["shell_prefix"])
 
 ################################################################################
@@ -25,3 +25,8 @@ def parse_path(path):
 
 def get_modules(names):
     return ' '.join([config["modules"][name] for name in names])
+
+def stand_alone(mandatory_args):
+    """Check if the rules for stand-alone mode are defined, by checking if
+    the mandatory arguments are specified in the config."""
+    return all([arg in config for arg in mandatory_args])

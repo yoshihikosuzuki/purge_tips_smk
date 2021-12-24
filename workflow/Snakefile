@@ -6,14 +6,13 @@ SNAKE_DIR = os.path.normpath(os.path.dirname(workflow.snakefile))
 ################################################################################
 
 ROOT, BASE, EXT = parse_path(config['hifi_fastq'])
-base = BASE
 FINAL_OUTPUT = f"{BASE}.filtered.fastq"
 COUNTER = 1
 
 def is_converged(wildcards):
     global FINAL_OUTPUT, COUNTER
     if not os.path.exists(FINAL_OUTPUT):
-        checkpoints.purge_tips.get(dir=COUNTER)
+        checkpoints.purge_tips.get(dir=COUNTER, base=BASE)
         COUNTER += 1
         return f"{COUNTER}/{BASE}.filtered.fastq"
     else:
@@ -40,7 +39,9 @@ module hifiasm:
     snakefile: "hifiasm/Snakefile"
     config: config
 
-use rule hifiasm from hifiasm
+use rule hifiasm from hifiasm with:
+    input:
+        read = f"{{dir}}/{BASE}.fastq"
 
 module winnowmap:
     snakefile: "winnowmap/Snakefile"
@@ -48,15 +49,8 @@ module winnowmap:
 
 use rule winnowmap from winnowmap with:
     input:
-        asm  = "{dir}/{base}.hifiasm.bp.p_utg.fasta",
-        read = "{dir}/{base}.fastq"
-    output:
-        bam  = "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.bam",
-        bai  = "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.bam.bai",
-        _    = directory(temp("{dir}/{base}.hifiasm.bp.p_utg.winnowmap.meryl")),
-        __   = temp("{dir}/{base}.hifiasm.bp.p_utg.winnowmap.rep")
-    log:
-        "{dir}/{base}.hifiasm.bp.p_utg.winnowmap.log"
+        asm  = "{dir}/{base}.fasta",
+        read = f"{{dir}}/{BASE}.fastq"
 
 checkpoint purge_tips:
     input:
